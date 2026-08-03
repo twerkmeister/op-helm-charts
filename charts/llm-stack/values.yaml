@@ -12,7 +12,7 @@ apisixInitialConfig:
       - name: gemma-4-26b-a4b-it
         provider: scaleway
   consumer_usage_limits:
-    num_tokens: 1000000
+    num_tokens: 10000000
     time_window_seconds: 86400 # 24h
     limit_strategy: total_tokens
   secrets:
