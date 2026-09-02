@@ -1,7 +1,7 @@
 PORT=${PORT:-80}
 HOST=${HOST:-llm-stack.localhost}
 
-curl http://$HOST:$PORT/v1/chat/completions \
+curl http://$HOST:$PORT/v1/chat/completions -v \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-client-v1-abcdef123456" \
   -d '{
