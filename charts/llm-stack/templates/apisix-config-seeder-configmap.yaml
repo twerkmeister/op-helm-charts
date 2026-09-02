@@ -18,12 +18,13 @@ data:
     import sys
     import json
     import os
+    from datetime import datetime
 
     url = "http://{{ include "common.names.fullname" . }}-apisix-admin-headless:9180/apisix/admin/configs"
     headers = {
         "X-API-KEY": os.getenv("ADMIN_API_KEY", ""),
         "Content-Type": "application/json",
-        "X-DIGEST": "initial-config"
+        "X-DIGEST": str(datetime.now())
     }
 
     # Wait for APISIX Admin API to be ready
@@ -62,7 +63,8 @@ data:
                 "ai-rate-limiting": {
                     "limit": {{ .Values.apisixInitialConfig.consumerUsageLimits.numTokens}},
                     "time_window": {{ .Values.apisixInitialConfig.consumerUsageLimits.timeWindowSeconds }},
-                    "limit_strategy": {{ .Values.apisixInitialConfig.consumerUsageLimits.limitStrategy | quote }}
+                    "limit_strategy": {{ .Values.apisixInitialConfig.consumerUsageLimits.limitStrategy | quote }},
+                    "rejected_code": 429
                 },
             }
         } for consumer in consumer_data

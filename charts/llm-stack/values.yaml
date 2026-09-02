@@ -11,8 +11,16 @@ apisixInitialConfig:
         provider: scaleway
       - name: gemma-4-26b-a4b-it
         provider: scaleway
+      - name: glm-5.2
+        provider: scaleway
+      - name: deepseek-v4-flash-0731
+        provider: scaleway
+      - name: qwen3.5-397b-a17b
+        provider: scaleway
+      - name: mistral-medium-3.5-128b
+        provider: scaleway
   consumerUsageLimits:
-    numTokens: 10000000
+    numTokens: 50000000
     timeWindowSeconds: 86400  # 24h
     limitStrategy: total_tokens
   secrets:
