@@ -3,15 +3,6 @@
 --
 local core       = require("apisix.core")
 local cjson      = require("cjson.safe")
-local ngx        = ngx
-local ngx_ok     = ngx.OK
-local str_sub    = string.sub
-local str_find   = string.find
-local str_rev    = string.reverse
-local ceil       = math.ceil
-local concat     = table.concat
-local insert     = table.insert
-local type       = type
 
 local plugin_name = "ai-loop-guard"
 
@@ -81,31 +72,23 @@ end
 
 
 
--- s has period p  <=>  s[i] == s[i+p] for all i  <=>  s:sub(1,#s-p) == s:sub(p+1)
--- One memcmp at C level, no per-character Lua loop.
+-- s has a period x where p % x == 0  <=>  s[i] == s[i+p] for all i  <=>  s:sub(1,#s-p) == s:sub(p+1)
 local function has_period(s, p)
     local n = #s
     if p <= 0 or p >= n then
         return false
     end
-    return str_sub(s, 1, n - p) == str_sub(s, p + 1)
+    -- check if the characters up till the start of the last period are equal to those starting from the second period
+    return string.sub(s, 1, n - p) == string.sub(s, p + 1)
 end
 
 
 -- Find the period of a repeating tail, if any.
 --
--- Rather than testing every p in 1..max_period (which costs max_period
--- substring copies per check), take the last `seed_size` bytes as a probe and
--- look for earlier occurrences of it within the last `max_period` bytes. Each
--- hit yields one candidate period; inside a truly periodic region the seed can
--- only recur at multiples of the real period, so a handful of candidates is
--- enough, and a candidate is confirmed with a single memcmp.
---
--- The search region is reversed first. string.find only scans forward, but we
--- need the *nearest* earlier occurrence: a stream looping on "ha" also matches
--- the seed 510 bytes back, and reporting period 510 would demand 4x510 bytes
--- of confirmation that a short loop never accumulates. Reversed, the nearest
--- occurrence is the first match, so the smallest period is tried first.
+-- 1. take the last `seed_size` bytes of the window as a probe and look for re-occurrences from the end of the window
+-- 2. check whether the region up to the first re-occurrence position repeats multiple at the end of the window
+--      (for at least conf.min_repeats or conf.min_match_bytes, whichever is more prohibitive)
+-- 3. if no loop was found look for the next reoccurrence (up to conf.max_candidates tries)
 local function find_period(window, conf)
     local window_length = #window
     local seed_size = conf.seed_size
@@ -119,34 +102,35 @@ local function find_period(window, conf)
         region_start = 1
     end
 
-    local reversed_window = str_rev(str_sub(window, region_start))
-    local seed_reversed = str_sub(reversed_window, 1, seed_size)
+
+    local reversed_window = string.reverse(string.sub(window, region_start))
+    local seed_reversed = string.sub(reversed_window, 1, seed_size)
 
     local init, tried = 2, 0
     while tried < conf.max_candidates do
-        local pos = str_find(reversed_window, seed_reversed, init, true)   -- plain find, no PCRE
+        local pos = string.find(reversed_window, seed_reversed, init, true)
         if not pos then
             break
         end
         tried = tried + 1
         local candidate_period = pos - 1
 
-        -- Require both a repeat count and a minimum matched length: 4x a
-        -- 1-byte period is a meaningless 4 bytes, 4x a 33-byte sentence is a
-        -- real loop.
+        if candidate_period >= conf.max_period then
+            break
+        end
 
+        -- combine needed repeats and min match bytes to look for strong signal
         local needed_repeats = conf.min_repeats
-
         if candidate_period * needed_repeats < conf.min_match_bytes then
             -- increase needed repeats so that candidate_period * needed_repeats >= conf.min_match_bytes
-            needed_repeats = ceil(conf.min_match_bytes / candidate_period)
+            needed_repeats = math.ceil(conf.min_match_bytes / candidate_period)
         end
         local needed_bytes = candidate_period * needed_repeats
 
         if needed_bytes <= window_length then
-            local tail = str_sub(window, window_length - needed_bytes + 1)
+            local tail = string.sub(window, window_length - needed_bytes + 1)
             if has_period(tail, candidate_period) then
-                return candidate_period, str_sub(tail, 1, candidate_period), needed_repeats
+                return candidate_period, string.sub(tail, 1, candidate_period), needed_repeats
             end
         end
 
@@ -286,7 +270,7 @@ function _M.body_filter(conf, ctx)
 
         local window = state.window .. new_text
         if #window > conf.window_size then
-            window = str_sub(window, -conf.window_size)
+            window = string.sub(window, -conf.window_size)
         end
         state.window = window
 
@@ -323,6 +307,5 @@ function _M.body_filter(conf, ctx)
         prometheus_histogram_ai_loop_guard_detected_period:observe(state.verdict.period, {route_id, status, consumer})
     end
 end
-
 
 return _M
