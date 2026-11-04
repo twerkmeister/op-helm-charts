@@ -62,7 +62,7 @@ kubectl create namespace llm-stack
 
 **Creating the Apisix initial config secret:**
 ```bash
-kubectl create secret generic llm-stack-apisix-initial-config-secret --from-literal=scaleway_api_key='abc' --from-literal=consumers='[{"name": "consumerA", "key": "sk-client-v1-abcdef123456"}]' -n llm-stack
+kubectl create secret generic llm-stack-apisix-initial-config-secret --from-literal=scaleway_api_key='abc' --from-literal=consumers='[{"name": "consumerA", "key": "sk-client-v1-abcdef123456", "auth_type": "api_key"}]' -n llm-stack
 ```
 * `scaleway_api_key` is the key of a provider you are forwarding the requests to. In this case, it's scaleway. These keys are referenced in your values.yaml
 * `consumers` is a stringified json array of consumers
@@ -71,7 +71,7 @@ kubectl create secret generic llm-stack-apisix-initial-config-secret --from-lite
 
 To add a consumer or provider key, this is closest to the original creation:
 ```bash
-kubectl patch secret llm-stack-apisix-initial-config-secret --patch "$(kubectl create secret generic llm-stack-apisix-initial-config-secret --from-literal=other_provider_api_key='abc' --from-literal=scaleway_api_key='xyz' --from-literal=consumers='[{"name": "consumerA", "key": "sk-client-v1-abcdef123456"}, {"name": "def", "key": "abc"}]' --dry-run=client -o json )" -n llm-stack
+kubectl patch secret llm-stack-apisix-initial-config-secret --patch "$(kubectl create secret generic llm-stack-apisix-initial-config-secret --from-literal=other_provider_api_key='abc' --from-literal=scaleway_api_key='xyz' --from-literal=consumers='[{"name": "consumerA", "key": "sk-client-v1-abcdef123456", "auth_type": "api_key"}, {"name": "def", "key": "abc", "auth_type": "api_key"}, {"name": "op-community", "issuer": "https://community.openproject.org", "public_key": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----", "auth_type": "jwt"}]' --dry-run=client -o json )" -n llm-stack
 ```
 
 **Creating the apisix admin API:**

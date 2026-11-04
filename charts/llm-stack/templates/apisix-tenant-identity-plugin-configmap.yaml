@@ -1,0 +1,13 @@
+{{- if .Values.apisix.apisix.customPlugins.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apisix-tenant-identity-plugin-configmap
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "common.labels.standard" ( dict "customLabels" .Values.commonLabels "context" $ ) | nindent 4 }}
+data:
+  tenant_identity.lua: |
+{{ .Files.Get "apisix-plugins/tenant-identity.lua" | indent 4 }}
+
+{{ end }}

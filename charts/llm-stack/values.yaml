@@ -32,10 +32,20 @@ apisix:
             mounts:
               - key: ai_loop_guard.lua
                 path: /opts/custom_plugins/apisix/plugins/ai-loop-guard.lua
+        - name: tenant-identity
+          configMap:
+            name: apisix-tenant-identity-plugin-configmap
+            mounts:
+              - key: tenant_identity.lua
+                path: /opts/custom_plugins/apisix/plugins/tenant-identity.lua
     plugins:
       - key-auth
+      - jwt-auth
+      - multi-auth
+      - tenant-identity
       - ai-proxy
       - ai-rate-limiting
+      - limit-count
       - ai-loop-guard
       - prometheus
       - serverless-pre-function

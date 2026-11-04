@@ -16,6 +16,10 @@ data:
     import os
     from datetime import datetime
 
+    AUTH_TYPE_API_KEY = "api_key"
+    AUTH_TYPE_JWT = "jwt"
+    VALID_AUTH_TYPES = [AUTH_TYPE_API_KEY, AUTH_TYPE_JWT]
+
     url = "http://{{ include "common.names.fullname" . }}-apisix-admin-headless:9180/apisix/admin/configs"
     headers = {
         "X-API-KEY": os.getenv("ADMIN_API_KEY", ""),
@@ -35,36 +39,70 @@ data:
            print(f"Error: {e}", flush=True)
         time.sleep(2)
 
-    # function that makes apisix auth schema work like the openai-compatible auth schema instead
-    auth_rewrite_function = "return function(conf, ctx) local auth = ngx.req.get_headers()[\"Authorization\"] if auth then local token = auth:match(\"^[Bb]earer%s+(.+)$\") if token then ngx.req.set_header(\"Authorization\", token) end end end"
-    auth_plugins = {
-         "serverless-pre-function": {
-             "phase": "rewrite",
-             "functions": [auth_rewrite_function]
-         },
-         "key-auth": {
-             "header": "Authorization",
-             "hide_credentials": True
-         },
-      }
-
     consumer_data = json.loads(os.getenv("API_CONSUMERS", "[]"))
-    apisix_consumers = [
-        {
-            "username": consumer["name"],
-            "plugins": {
+    consumers = []
+    jwt_consumers = []
+    for consumer in json.loads(os.getenv("API_CONSUMERS", "[]")):
+        data = {"username": consumer["name"]}
+        auth_type = consumer.get("auth_type", "").lower()
+        if auth_type == AUTH_TYPE_API_KEY:
+            data["plugins"] = {
                 "key-auth": {
                     "key": consumer["key"]
-                },
-                "ai-rate-limiting": {
-                    "limit": {{ .Values.apisixConfig.consumerUsageLimits.numTokens}},
-                    "time_window": {{ .Values.apisixConfig.consumerUsageLimits.timeWindowSeconds }},
-                    "limit_strategy": {{ .Values.apisixConfig.consumerUsageLimits.limitStrategy | quote }},
-                    "rejected_code": 429
-                },
+                }
             }
-        } for consumer in consumer_data
-    ]
+        elif auth_type == AUTH_TYPE_JWT:
+            data["plugins"] = {
+                "jwt-auth": {
+                    "key": consumer["issuer"],
+                    "public_key": consumer["public_key"],
+                    "algorithm": "EdDSA"
+                }
+            }
+            jwt_consumers.append(consumer["name"])
+        else:
+            raise ValueError(f"invalid auth_type for consumer {consumer["name"]}: '{auth_type}'. Must be one of {', '.join(VALID_AUTH_TYPES)}.")
+        consumers.append(data)
+
+    # function that makes apisix auth schema work like the openai-compatible auth schema instead
+    # specifically it strips the "bearer" part from the auth that apisix does not use
+    auth_rewrite_function = "return function(conf, ctx) local auth = ngx.req.get_headers()[\"Authorization\"] if auth then local token = auth:match(\"^[Bb]earer%s+(.+)$\") if token then ngx.req.set_header(\"Authorization\", token) end end end"
+    auth_plugins = {
+        "serverless-pre-function": {
+            "phase": "rewrite",
+            "functions": [auth_rewrite_function]
+        },
+        "multi-auth": {
+            "auth_plugins": [
+                { "jwt-auth": { "key_claim_name": "iss", "hide_credentials": True, "header": "Authorization"} },
+                { "key-auth": { "header": "Authorization", "hide_credentials": True} }
+            ]
+        },
+        "tenant-identity": {
+            "jwt_consumers": jwt_consumers
+        }
+    }
+    rate_limiting_plugins = {
+    #    "ai-rate-limiting": {
+    #        "limit_strategy": {{ .Values.apisixConfig.consumerUsageLimits.limitStrategy | quote }},
+    #        "rejected_code": 429,
+    #        "rules": [
+    #            {
+    #                "key": "$http_x_consumer_username",
+    #                "count": {{ .Values.apisixConfig.consumerUsageLimits.numTokens}},
+    #                "time_window":  {{ .Values.apisixConfig.consumerUsageLimits.timeWindowSeconds }},
+    #            }
+    #        ]
+    #    },
+        "limit-count": {
+            "rejected_code": 429,
+            "group": "global",
+            "rules": [
+                { "key": "$http_x_consumer_username second", "count": 10, "time_window": 1, "header_prefix": "per-second" },
+                { "key": "$http_x_consumer_username day", "count": 1000, "time_window": 86400, "header_prefix": "per-day" }
+            ]
+        }
+    }
 
     # the serverless function makes sure the auth headers are the same as when an openai compatible endpoint
     config = {
@@ -90,10 +128,11 @@ data:
                 "uri": {{ $uri | quote }},
                 "priority": 10,
                 "vars": [
-                    ["post_arg.model", "~~", "^({{- range $index, $model := $route.models }}{{ if $index }}|{{ end }}{{ regexQuoteMeta $model.name }}{{ end }})$"]
+                    ["post_arg.model", "~~", r"^({{- range $index, $model := $route.models }}{{ if $index }}|{{ end }}{{ regexQuoteMeta $model.name }}{{ end }})$"]
                 ],
                 "plugins": {
                     **auth_plugins,
+                    **rate_limiting_plugins,
                     "prometheus": {},
                     "ai-proxy": {
                         "provider": "{{ $route.providerFormat }}",
@@ -169,7 +208,7 @@ data:
                 }
             }
         ],
-        "consumers": apisix_consumers
+        "consumers": consumers
     }
 
 
